@@ -16,7 +16,8 @@ jobs:
       uses: ilammy/msvc-dev-cmd@v1
 
     - name: Build SnapKey
-      run: cl SnapKey.cpp user32.lib shell32.lib /O2 /FeSnapKey.exe
+      run: |
+        cl SnapKey.cpp user32.lib shell32.lib /O2 /std:c++17 /EHsc /FeSnapKey.exe
 
     - name: Upload EXE
       uses: actions/upload-artifact@v4
