@@ -2,6 +2,7 @@
 #include <thread>
 #include <atomic>
 #include <chrono>
+#include <random>
 
 std::atomic<bool> running(true);
 
@@ -11,8 +12,23 @@ int keyPairs[2][2] = {
     {83, 87}  // S W
 };
 
-// Trạng thái phím
 std::atomic<bool> keyState[256];
+
+// Random generator
+std::random_device rd;
+std::mt19937 gen(rd());
+
+// Delay random 1–4ms
+int getRandomDelay() {
+    std::uniform_int_distribution<> dist(1, 4);
+    return dist(gen);
+}
+
+// Jitter nhỏ (giảm pattern)
+bool randomSkip() {
+    std::uniform_int_distribution<> dist(0, 100);
+    return dist(gen) < 3; // ~3% skip
+}
 
 LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode == HC_ACTION) {
@@ -22,7 +38,7 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
         if (wParam == WM_KEYDOWN) {
             keyState[vkCode] = true;
 
-            // Logic Snap Tap
+            // Snap logic
             for (auto& pair : keyPairs) {
                 if (vkCode == pair[0]) {
                     keyState[pair[1]] = false;
@@ -42,7 +58,12 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
 void UpdateLoop() {
     while (running) {
+
         for (int i = 0; i < 256; i++) {
+
+            // Skip random để tránh pattern cứng
+            if (randomSkip()) continue;
+
             if (keyState[i]) {
                 keybd_event(i, 0, 0, 0);
             } else {
@@ -50,12 +71,15 @@ void UpdateLoop() {
             }
         }
 
-        // Delay nhẹ kiểu human (1ms)
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        // Delay random (1–4ms)
+        std::this_thread::sleep_for(std::chrono::milliseconds(getRandomDelay()));
     }
 }
 
 int main() {
+    // init state
+    for (int i = 0; i < 256; i++) keyState[i] = false;
+
     HHOOK hook = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardProc, NULL, 0);
 
     std::thread t(UpdateLoop);
