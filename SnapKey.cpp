@@ -1,98 +1,46 @@
-#include <windows.h>
-#include <thread>
-#include <atomic>
-#include <chrono>
-#include <random>
+name: C/C++ CI
 
-std::atomic<bool> running(true);
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
-// Key pairs: A-D và S-W
-int keyPairs[2][2] = {
-    {65, 68}, // A D
-    {83, 87}  // S W
-};
+jobs:
+  build:
+    runs-on: windows-latest
 
-std::atomic<bool> keyState[256];
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-// Random generator
-std::random_device rd;
-std::mt19937 gen(rd());
+    - name: Cache MinGW
+      uses: actions/cache@v3
+      with:
+        path: C:\tools\mingw64
+        key: mingw-${{ runner.os }}-${{ hashFiles('**/SnapKey.cpp', '**/resources.rc') }}
+        restore-keys: |
+          mingw-${{ runner.os }}-
 
-// Delay random 1–4ms
-int getRandomDelay() {
-    std::uniform_int_distribution<> dist(1, 4);
-    return dist(gen);
-}
+    - name: Install MinGW
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: choco install mingw
 
-// Jitter nhỏ (giảm pattern)
-bool randomSkip() {
-    std::uniform_int_distribution<> dist(0, 100);
-    return dist(gen) < 3; // ~3% skip
-}
+    - name: Add MinGW to Path
+      run: echo "C:\tools\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding ascii -Append
 
-LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
-    if (nCode == HC_ACTION) {
-        KBDLLHOOKSTRUCT* p = (KBDLLHOOKSTRUCT*)lParam;
-        int vkCode = p->vkCode;
+    - name: Compile resource file
+      run: windres resources.rc -o resources.o
 
-        if (wParam == WM_KEYDOWN) {
-            keyState[vkCode] = true;
+    - name: Compile the executable
+      run: g++ -o SnapKey SnapKey.cpp resources.o -mwindows -std=c++11 -static
 
-            // Snap logic
-            for (auto& pair : keyPairs) {
-                if (vkCode == pair[0]) {
-                    keyState[pair[1]] = false;
-                }
-                if (vkCode == pair[1]) {
-                    keyState[pair[0]] = false;
-                }
-            }
-        }
+    - name: Upload executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: SnapKey-executable
+        path: SnapKey.exe
 
-        if (wParam == WM_KEYUP) {
-            keyState[vkCode] = false;
-        }
-    }
-    return CallNextHookEx(NULL, nCode, wParam, lParam);
-}
-
-void UpdateLoop() {
-    while (running) {
-
-        for (int i = 0; i < 256; i++) {
-
-            // Skip random để tránh pattern cứng
-            if (randomSkip()) continue;
-
-            if (keyState[i]) {
-                keybd_event(i, 0, 0, 0);
-            } else {
-                keybd_event(i, 0, KEYEVENTF_KEYUP, 0);
-            }
-        }
-
-        // Delay random (1–4ms)
-        std::this_thread::sleep_for(std::chrono::milliseconds(getRandomDelay()));
-    }
-}
-
-int main() {
-    // init state
-    for (int i = 0; i < 256; i++) keyState[i] = false;
-
-    HHOOK hook = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardProc, NULL, 0);
-
-    std::thread t(UpdateLoop);
-
-    MSG msg;
-    while (GetMessage(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-    }
-
-    running = false;
-    t.join();
-
-    UnhookWindowsHookEx(hook);
-    return 0;
-}
+    - name: Run executable
+      run: .\SnapKey.exe
+      if: always()
